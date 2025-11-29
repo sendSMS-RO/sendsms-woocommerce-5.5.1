@@ -3,7 +3,7 @@
 Plugin Name: SendSMS
 Plugin URI: https://www.sendsms.ro/ro/ecommerce/plugin-woocommerce/
 Description: Use our SMS shipping solution to deliver the right information at the right time. Give your customers a superior experience!
-Version: 1.2.9
+Version: 1.4.0
 Author: sendSMS
 License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -105,26 +105,17 @@ function wc_sendsms_update_db_check()
 add_action('plugins_loaded', 'wc_sendsms_update_db_check');
 
 # add scripts
-function wc_sendsms_load_scripts()
+function wc_sendsms_load_scripts($hook)
 {
-    # load jquery if it's not loaded
-    if (!wp_script_is('jquery', 'enqueued')) {
-        wp_enqueue_script('jquery');
-    }
+    # Enqueue WordPress's built-in jQuery UI Datepicker
+    wp_enqueue_script('jquery-ui-datepicker');
+    wp_enqueue_style('jquery-ui-css', 'https://code.jquery.com/ui/1.13.2/themes/base/jquery-ui.css');
 
-    # script for datepicker
-    wp_enqueue_style('datepickerdefault', trailingslashit(plugin_dir_url(__FILE__)) . 'datepicker/themes/default.css');
-    wp_enqueue_style('datepickerdefaultdate', trailingslashit(plugin_dir_url(__FILE__)) . 'datepicker/themes/default.date.css');
-    wp_enqueue_script('datepickerdefault', trailingslashit(plugin_dir_url(__FILE__)) . 'datepicker/picker.js', array('jquery'));
-    wp_enqueue_script('datepickerdefaultdate', trailingslashit(plugin_dir_url(__FILE__)) . 'datepicker/picker.date.js', array('jquery'));
-    wp_enqueue_script('wcsendsms', trailingslashit(plugin_dir_url(__FILE__)) . 'wc_sendsms.js', array('jquery'));
+    wp_enqueue_script('wc_sendsms', plugin_dir_url(__FILE__) . 'wc_sendsms.js', array('jquery'));
 
-    # script & style for jquery
-    wp_enqueue_style('select2', trailingslashit(plugin_dir_url(__FILE__)) . 'jquery/select2/select2.min.css');
-    wp_enqueue_script('select2', trailingslashit(plugin_dir_url(__FILE__)) . 'jquery/select2/select2.min.js', array('jquery'));
-
-    // please create also an empty JS file in your theme directory and include it too
-    wp_enqueue_script('js_for_select2', trailingslashit(plugin_dir_url(__FILE__)) . 'forselect2.js', array('jquery', 'select2'));
+    // WooCommerce already registers these, just enqueue them
+    wp_enqueue_style('woocommerce_admin_styles');
+    wp_enqueue_script('wc-enhanced-select');
 }
 add_action('admin_enqueue_scripts', 'wc_sendsms_load_scripts');
 
@@ -379,53 +370,54 @@ function wc_sendsms_login()
 function wc_sendsms_get_woocommerce_product_list()
 {
     $full_product_list = array();
-    $loop = new WP_Query(array('post_type' => array('product', 'product_variation'), 'posts_per_page' => -1));
 
-    while ($loop->have_posts()) : $loop->the_post();
-        $theid = get_the_ID();
-        if (get_post_type() == 'product_variation') {
-            $product = new WC_Product_Variation($theid);
-        } else {
-            $product = new WC_Product($theid);
-        }
-        // its a variable product
-        if (get_post_type() == 'product_variation') {
-            $parent_id = wp_get_post_parent_id($theid);
-            $sku = get_post_meta($theid, '_sku', true);
-            $thetitle = get_the_title($parent_id);
+    // Query for published products and variations
+    $loop = new WP_Query(array(
+        'post_type' => array('product', 'product_variation'),
+        'post_status' => 'publish',
+        'posts_per_page' => -1,
+        'fields' => 'ids' // Only get IDs for better performance
+    ));
 
-            // ****** Some error checking for product database *******
-            // check if variation sku is set
-            if ($sku == '') {
-                if ($parent_id == 0) {
-                    // Remove unexpected orphaned variations.. set to auto-draft
-                    $false_post = array();
-                    $false_post['ID'] = $theid;
-                    $false_post['post_status'] = 'auto-draft';
-                    wp_update_post($false_post);
-                    //if (function_exists(add_to_debug)) add_to_debug('false post_type set to auto-draft. id='.$theid);
-                } else {
-                    // there's no sku for this variation > copy parent sku to variation sku
-                    // & remove the parent sku so the parent check below triggers
-                    $sku = get_post_meta($parent_id, '_sku', true);
-                    //if (function_exists(add_to_debug)) add_to_debug('empty sku id='.$theid.'parent='.$parent_id.'setting sku to '.$sku);
-                    update_post_meta($theid, '_sku', $sku);
-                    update_post_meta($parent_id, '_sku', '');
+    if ($loop->have_posts()) {
+        foreach ($loop->posts as $product_id) {
+            $product = wc_get_product($product_id);
+
+            // Skip if product object is invalid
+            if (!$product) {
+                continue;
+            }
+
+            // Get product details
+            $product_name = $product->get_name();
+            $sku = $product->get_sku();
+
+            // If no SKU, use product ID as identifier
+            if (empty($sku)) {
+                $sku = 'ID-' . $product_id;
+            }
+
+            // For variations, include parent product name
+            if ($product->is_type('variation')) {
+                $parent_id = $product->get_parent_id();
+                if ($parent_id) {
+                    $parent = wc_get_product($parent_id);
+                    if ($parent) {
+                        $product_name = $parent->get_name() . ' - ' . $product_name;
+                    }
                 }
             }
-            // ****************** end error checking *****************
 
-            // its a simple product
-        } else {
-            $sku = get_post_meta($theid, '_sku', true);
-            $thetitle = get_the_title();
+            // Add to list: [name, sku, id]
+            $full_product_list[] = array($product_name, $sku, $product_id);
         }
-        // add product to array but don't add the parent of product variations
-        if (!empty($sku)) $full_product_list[] = array($thetitle, $sku, $theid);
-    endwhile;
+    }
+
     wp_reset_query();
-    // sort into alphabetical order, by title
+
+    // Sort by product name
     sort($full_product_list);
+
     return $full_product_list;
 }
 
@@ -541,9 +533,42 @@ function wc_sendsms_campaign()
     # get all products
     $products = wc_sendsms_get_woocommerce_product_list();
 
-    $billing_states = $wpdb->get_results('SELECT DISTINCT meta_value FROM ' . $wpdb->prefix . 'postmeta WHERE meta_key = \'_billing_state\' ORDER BY meta_value ASC');
+    // Get billing states from completed orders using HPOS-compatible method
+    $orders_for_states = wc_get_orders(array(
+        'limit' => -1,
+        'status' => 'completed',
+        'type' => 'shop_order', // Exclude refunds
+        'return' => 'objects'
+    ));
 
+    $billing_states_data = array(); // Array to hold state_code => state_name
+    foreach ($orders_for_states as $order) {
+        // Extra safety check to skip refunds
+        if ($order->get_type() !== 'shop_order') {
+            continue;
+        }
+        $state_code = $order->get_billing_state();
+        $country_code = $order->get_billing_country();
 
+        if (!empty($state_code) && !isset($billing_states_data[$state_code])) {
+            // Get the full state name from WooCommerce
+            $states = WC()->countries->get_states($country_code);
+            $state_name = isset($states[$state_code]) ? $states[$state_code] : $state_code;
+            $billing_states_data[$state_code] = $state_name;
+        }
+    }
+
+    // Sort by state name
+    asort($billing_states_data);
+
+    // Convert to objects to match old format (but store both code and name)
+    $billing_states = array();
+    foreach ($billing_states_data as $code => $name) {
+        $obj = new stdClass();
+        $obj->state_code = $code; // Store the code for filtering
+        $obj->meta_value = $name; // Display the full name
+        $billing_states[] = $obj;
+    }
 
     $orders = array();
     if (!isset($_REQUEST['filtering'])) {
@@ -590,15 +615,15 @@ function wc_sendsms_campaign()
             <input type="hidden" name="filtering" value="true" />
             <div style="width: 100%; clear: both;">
                 <div style="width: 48%; float: left;">
-                    <p><?php echo esc_html('Period', 'sendsms') ?> <input type="text" class="wcsendsmsdatepicker" name="perioada_start" value="<?php isset($_GET['perioada_start']) ? wc_sendsms_sanitize_event_time($_GET['perioada_start']) : '' ?>" /> - <input type="text" class="wcsendsmsdatepicker" name="perioada_final" value="<?php isset($_GET['perioada_final']) ? wc_sendsms_sanitize_event_time($_GET['perioada_final']) : '' ?>" /></p>
+                    <p><?php echo esc_html('Period', 'sendsms') ?> <input type="text" class="wcsendsmsdatepicker" name="perioada_start" value="<?php echo isset($_GET['perioada_start']) ? esc_attr(wc_sendsms_sanitize_event_time($_GET['perioada_start'])) : ''; ?>" /> - <input type="text" class="wcsendsmsdatepicker" name="perioada_final" value="<?php echo isset($_GET['perioada_final']) ? esc_attr(wc_sendsms_sanitize_event_time($_GET['perioada_final'])) : ''; ?>" /></p>
                 </div>
                 <div style="width: 48%; float: left">
-                    <p><?php echo esc_html('Minimum amount per order:', 'sendsms') ?> <input type="number" name="suma" value="<?php isset($_GET['suma']) ? wc_sendsms_sanitize_float($_GET['suma']) : '0' ?>" /></p>
+                    <p><?php echo esc_html('Minimum amount per order:', 'sendsms') ?> <input type="number" name="suma" value="<?php echo isset($_GET['suma']) ? esc_attr(wc_sendsms_sanitize_float($_GET['suma'])) : '0'; ?>" /></p>
                 </div>
                 <div style="width: 100%; clear: both;">
                     <div style="width: 48%; float: left;" class="mySelect">
-                        <p><?php echo esc_html('The purchased product (leave blank to select all products):', 'sendsms') ?>
-                            <select id="produse_selectate" name="produse[]" multiple="multiple" style="width:80%;max-width:25em;">
+                        <p><?php echo esc_html('The purchased product (leave blank to select all products):', 'sendsms') ?></p>
+                        <select id="produse_selectate" name="produse[]" multiple="multiple" class="wc-enhanced-select" data-placeholder="<?php echo esc_attr('Select products...', 'sendsms'); ?>" style="width: 90%;">
                                 <?php
                                 for ($i = 0; $i < count($products); $i++) {
                                     $selected = false;
@@ -611,38 +636,36 @@ function wc_sendsms_campaign()
                                         }
                                     }
                                 ?>
-                                    <option value="<?php "id_" . esc_attr($products[$i][2]) ?>" <?php $selected ? 'selected="selected"' : '' ?>><?php esc_attr($products[$i][0]) . " - " . esc_attr($products[$i][1]) ?></option>
+                                    <option value="<?php echo "id_" . esc_attr($products[$i][2]); ?>" <?php echo $selected ? 'selected="selected"' : ''; ?>><?php echo esc_html($products[$i][0]) . " - " . esc_html($products[$i][1]); ?></option>
                                 <?php
                                 }
                                 ?>
                             </select>
-                        </p>
                     </div>
                     <div style="width: 48%; float: left;">
-                        <p><?php echo esc_html('Billing County (leave blank to select all counties):', 'sendsms') ?>
-                            <select id="judete_selectate" name="judete[]" multiple="multiple" style="width:80%;max-width:25em;">
+                        <p><?php echo esc_html('Billing County (leave blank to select all counties):', 'sendsms') ?></p>
+                        <select id="judete_selectate" name="judete[]" multiple="multiple" class="wc-enhanced-select" data-placeholder="<?php echo esc_attr('Select counties...', 'sendsms'); ?>" style="width: 90%;">
                                 <?php
                                 for ($i = 0; $i < count($billing_states); $i++) {
                                     $selected = false;
                                     if (isset($_GET['judete'])) {
                                         $lenght = count($_GET['judete']);
                                         for ($j = 0; $j < $lenght; $j++) {
-                                            if (strcmp($_GET['judete'][$j], "id_" . $billing_states[$i]->meta_value) === 0) {
+                                            if (strcmp($_GET['judete'][$j], "id_" . $billing_states[$i]->state_code) === 0) {
                                                 $selected = true;
                                             }
                                         }
                                     }
                                 ?>
-                                    <option value="<?php "id_" . esc_attr($billing_states[$i]->meta_value) ?>" <?php $selected ? 'selected="selected"' : '' ?>><?php esc_attr($billing_states[$i]->meta_value) ?></option>
+                                    <option value="<?php echo "id_" . esc_attr($billing_states[$i]->state_code); ?>" <?php echo $selected ? 'selected="selected"' : ''; ?>><?php echo esc_html($billing_states[$i]->meta_value); ?></option>
                                 <?php
                                 }
                                 ?>
                             </select>
-                        </p>
                     </div>
                 </div>
             </div>
-            <div style="width: 100%; clear: both;">
+            <div style="width: 100%; clear: both; padding-top: 20px;">
                 <button type="submit" class="button button-default button-large aligncenter" value="filter"><?php echo esc_html('Filter', 'sendsms') ?></button>
             </div>
         </form>
@@ -668,12 +691,12 @@ function wc_sendsms_campaign()
                         <input type="checkbox" id="wc_sendsms_to_all" class="wc_sendsms_to_all" name="wc_sendsms_to_all" checked />
                         <?php echo esc_html('Send SMS to every number.', 'sendsms') ?></label>
                     </div>
-                    <select name="phones[]" id="phones" multiple="MULTIPLE" style="width: 90%; height: 250px" size="<?php empty($phones) ? 0 : count($phones) ?>">
+                    <select name="phones[]" id="phones" multiple="MULTIPLE" class="wc-enhanced-select" data-placeholder="<?php echo esc_attr('Select phone numbers...', 'sendsms'); ?>" style="width: 90%">
                         <?php
                         if (!empty($phones)) :
                             foreach ($phones as $phone) :
                         ?>
-                                <option value="<?php $phone ?>" selected><?php $phone ?></option>
+                                <option value="<?php echo esc_attr($phone); ?>" selected><?php echo esc_html($phone); ?></option>
                         <?php
                             endforeach;
                         endif;
@@ -727,12 +750,12 @@ function wc_sendsms_javascript_send()
                 all = jQuery('#wc_sendsms_to_all').is(":checked");
                 if (all) {
                     phones = '';
-                    produse = <?php isset($_GET['produse']) ? json_encode($_GET['produse']) : "[]" ?>;
-                    judete = <?php isset($_GET['judete']) ? json_encode($_GET['judete']) : "[]" ?>;
-                    suma = "<?php isset($_GET['suma']) ? wc_sendsms_sanitize_float($_GET['suma']) : "" ?>";
-                    perioada_final = "<?php isset($_GET['perioada_final']) ? wc_sendsms_sanitize_event_time($_GET['perioada_final']) : "" ?>";
-                    perioada_start = "<?php isset($_GET['perioada_start']) ? wc_sendsms_sanitize_event_time($_GET['perioada_start']) : "" ?>";
-                    filtering = "<?php isset($_REQUEST['filtering']) ? true : false ?>";
+                    produse = <?php echo isset($_GET['produse']) ? json_encode($_GET['produse']) : "[]"; ?>;
+                    judete = <?php echo isset($_GET['judete']) ? json_encode($_GET['judete']) : "[]"; ?>;
+                    suma = "<?php echo isset($_GET['suma']) ? esc_js(wc_sendsms_sanitize_float($_GET['suma'])) : ""; ?>";
+                    perioada_final = "<?php echo isset($_GET['perioada_final']) ? esc_js(wc_sendsms_sanitize_event_time($_GET['perioada_final'])) : ""; ?>";
+                    perioada_start = "<?php echo isset($_GET['perioada_start']) ? esc_js(wc_sendsms_sanitize_event_time($_GET['perioada_start'])) : ""; ?>";
+                    filtering = "<?php echo isset($_REQUEST['filtering']) ? 'true' : 'false'; ?>";
                 } else {
                     phones = jQuery('#phones').val().join("|");
                     produse = "";
@@ -743,7 +766,7 @@ function wc_sendsms_javascript_send()
                     filtering = "";
                 }
                 var data = {
-                    'security': '<?php wp_create_nonce('wc_sendsms_send_campaign') ?>',
+                    'security': '<?php echo wp_create_nonce('wc_sendsms_send_campaign'); ?>',
                     'action': 'wc_sendsms_campaign',
                     'all': all,
                     'phones': phones,
@@ -857,7 +880,7 @@ function wc_sendsms_ajax_send()
             ), ',', '"', '');
         }
         // $start_time = "2970-01-01 02:00:00";
-        $start_time = "";
+        $start_time = date('Y-m-d H:i:s');
         $name = 'Wordpress - ' . get_site_url() . ' - ' . uniqid();
         $data = file_get_contents("$pluginDir/batches/batch.csv");
         $results = json_decode(wp_remote_retrieve_body(wp_remote_post(
@@ -923,7 +946,7 @@ function wc_sendsms_javascript_estimate_price()
                         messages--
                     }
                     messages = Math.floor(messages);
-                    price = <?php get_option('wc-sendsms-default-price', 0) ?>;
+                    price = <?php echo esc_js(get_option('wc-sendsms-default-price', 0)); ?>;
                     if (price > 0) {
                         alert("<?php echo esc_html('The estimate price is: ', 'sendsms') ?>" + parseFloat(messages * price * phones).toPrecision(4) + "<?php echo esc_html(' (This is just an estimation, and not the actual price)', 'sendsms') ?>");
                     } else {
@@ -1337,7 +1360,7 @@ function wc_sendsms_order_details_meta_box()
 function wc_sendsms_order_details_sms_box($post)
 {
     ?>
-        <input type="hidden" name="wc_sendsms_order_id" id="wc_sendsms_order_id" value="<?php $post->ID ?>" />
+        <input type="hidden" name="wc_sendsms_order_id" id="wc_sendsms_order_id" value="<?php echo esc_attr($post->ID); ?>" />
         <p><?php echo esc_html('Phone:', 'sendsms') ?></p>
         <p><input type="text" name="wc_sendsms_phone" id="wc_sendsms_phone" style="width: 100%" /></p>
         <p><?php echo esc_html('Short URL? (Please use only links starting with https:// or http://)', 'sendsms') ?></p>
@@ -1548,150 +1571,177 @@ function wc_sendsms_clean_diacritice($string)
 
 function wc_sendsms_get_orders_filtered($perioada_start, $perioada_final, $suma, $judete, $produse)
 {
-    global $wpdb;
+    // Build WooCommerce query args (HPOS-compatible)
+    $args = array(
+        'limit' => -1,
+        'status' => 'completed',
+        'type' => 'shop_order', // Exclude refunds
+        'return' => 'objects'
+    );
 
-    # get all orders
-    $query = "select
-        p.ID as order_id,
-        p.post_date,
-        max( CASE WHEN pm.meta_key = '_billing_email' and p.ID = pm.post_id THEN pm.meta_value END ) as billing_email,
-        max( CASE WHEN pm.meta_key = '_billing_first_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_first_name,
-        max( CASE WHEN pm.meta_key = '_billing_last_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_last_name,
-        max( CASE WHEN pm.meta_key = '_billing_address_1' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_address_1,
-        max( CASE WHEN pm.meta_key = '_billing_address_2' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_address_2,
-        max( CASE WHEN pm.meta_key = '_billing_city' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_city,
-        max( CASE WHEN pm.meta_key = '_billing_state' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_state,
-        max( CASE WHEN pm.meta_key = '_billing_phone' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_phone,
-        max( CASE WHEN pm.meta_key = '_billing_postcode' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_postcode,
-        max( CASE WHEN pm.meta_key = '_shipping_first_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_first_name,
-        max( CASE WHEN pm.meta_key = '_shipping_last_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_last_name,
-        max( CASE WHEN pm.meta_key = '_shipping_address_1' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_address_1,
-        max( CASE WHEN pm.meta_key = '_shipping_address_2' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_address_2,
-        max( CASE WHEN pm.meta_key = '_shipping_city' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_city,
-        max( CASE WHEN pm.meta_key = '_shipping_state' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_state,
-        max( CASE WHEN pm.meta_key = '_shipping_postcode' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_postcode,
-        max( CASE WHEN pm.meta_key = '_order_total' and p.ID = pm.post_id THEN pm.meta_value END ) as order_total,
-        max( CASE WHEN pm.meta_key = '_order_tax' and p.ID = pm.post_id THEN pm.meta_value END ) as order_tax,
-        max( CASE WHEN pm.meta_key = '_paid_date' and p.ID = pm.post_id THEN pm.meta_value END ) as paid_date,
-        (
-            SELECT
-                GROUP_CONCAT(oim.meta_value SEPARATOR '|')
-            FROM
-                wp_woocommerce_order_itemmeta oim, wp_woocommerce_order_items oi
-            WHERE 
-                oi.order_item_id = oim.order_item_id AND oim.meta_key = '_product_id'  AND oi.order_id = p.ID
-        ) AS items_id,
-        ( select group_concat( order_item_id separator '|' ) from " . $wpdb->prefix . "woocommerce_order_items where order_id = p.ID ) as order_items
-    from
-        " . $wpdb->prefix . "posts p
-        join " . $wpdb->prefix . "postmeta pm on p.ID = pm.post_id
-        join " . $wpdb->prefix . "woocommerce_order_items oi on p.ID = oi.order_id
-        WHERE post_type = 'shop_order' AND post_status = 'wc-completed'";
-    $filters = array();
-    $having = [];
-    $where = '';
+    // Add date range filter
     if (!empty($perioada_start)) {
-        $where .= ' AND post_date >= %s';
-        $filters[] = wc_sendsms_sanitize_event_time($perioada_start);
+        $args['date_created'] = '>=' . wc_sendsms_sanitize_event_time($perioada_start);
     }
     if (!empty($perioada_final)) {
-        $where .= ' AND post_date <= %s';
-        $filters[] = wc_sendsms_sanitize_event_time($perioada_final);
-    }
-    if (!empty($suma)) {
-        $having[] = 'order_total >= %d';
-        $filters[] = wc_sendsms_sanitize_float($suma);
-    }
-    if (!empty($judete)) {
-        $having[] = '_billing_state IN (';
-        $elem = count($having) - 1;
-        for ($i = 0; $i < count($judete); $i++) {
-            $having[$elem] .= '\'%s\'';
-            if ($i < count($judete) - 1) {
-                $having[$elem] .= ', ';
-            }
-            $filters[] = str_replace("id_", "", sanitize_text_field($judete[$i]));
+        // Add one day to include orders from the final date
+        $final_date = date('Y-m-d', strtotime(wc_sendsms_sanitize_event_time($perioada_final) . ' +1 day'));
+        if (!empty($perioada_start)) {
+            $args['date_created'] = wc_sendsms_sanitize_event_time($perioada_start) . '...' . $final_date;
+        } else {
+            $args['date_created'] = '<' . $final_date;
         }
-        $having[$elem] .= ')';
     }
 
-    $query .= $where . ' group by p.ID';
-    if (!empty($having)) {
-        $query .= ' HAVING ' . implode(' AND ', $having);
-    }
+    // Get orders using WooCommerce API
+    $orders = wc_get_orders($args);
 
-    if (!empty($filters)) {
-        $orders = $wpdb->get_results($wpdb->prepare($query, $filters));
-    } else {
-        $orders = $wpdb->get_results($query);
-    }
+    // Convert to old format and apply filters
+    $result = array();
+    foreach ($orders as $order) {
+        // Skip refunds (extra safety check)
+        if ($order->get_type() !== 'shop_order') {
+            continue;
+        }
 
-    if (!empty($produse)) {
-        foreach ($orders as $key => $order) {
-            $items_id =  explode('|', $order->items_id);
-            $ok = false;
-            foreach ($items_id as $id) {
-                for ($i = 0; $i < count($produse); $i++) {
-                    $ok = str_replace("id_", "", sanitize_text_field($produse[$i])) == $id ? true : $ok;
+        // Filter by minimum order total
+        if (!empty($suma) && $order->get_total() < floatval(wc_sendsms_sanitize_float($suma))) {
+            continue;
+        }
+
+        // Filter by billing state
+        if (!empty($judete)) {
+            $order_state = $order->get_billing_state();
+            $state_match = false;
+            foreach ($judete as $judet) {
+                $clean_judet = str_replace("id_", "", sanitize_text_field($judet));
+                if ($order_state === $clean_judet) {
+                    $state_match = true;
+                    break;
                 }
             }
-            if (!$ok) {
-                unset($orders[$key]);
+            if (!$state_match) {
+                continue;
             }
         }
+
+        // Filter by products
+        if (!empty($produse)) {
+            $order_product_ids = array();
+            foreach ($order->get_items() as $item) {
+                $order_product_ids[] = $item->get_product_id();
+            }
+
+            $product_match = false;
+            foreach ($produse as $product) {
+                $clean_product = str_replace("id_", "", sanitize_text_field($product));
+                if (in_array($clean_product, $order_product_ids)) {
+                    $product_match = true;
+                    break;
+                }
+            }
+            if (!$product_match) {
+                continue;
+            }
+        }
+
+        // Convert to old format
+        $order_data = new stdClass();
+        $order_data->order_id = $order->get_id();
+        $order_data->post_date = $order->get_date_created()->date('Y-m-d H:i:s');
+        $order_data->billing_email = $order->get_billing_email();
+        $order_data->_billing_first_name = $order->get_billing_first_name();
+        $order_data->_billing_last_name = $order->get_billing_last_name();
+        $order_data->_billing_address_1 = $order->get_billing_address_1();
+        $order_data->_billing_address_2 = $order->get_billing_address_2();
+        $order_data->_billing_city = $order->get_billing_city();
+        $order_data->_billing_state = $order->get_billing_state();
+        $order_data->_billing_phone = $order->get_billing_phone();
+        $order_data->_billing_postcode = $order->get_billing_postcode();
+        $order_data->_shipping_first_name = $order->get_shipping_first_name();
+        $order_data->_shipping_last_name = $order->get_shipping_last_name();
+        $order_data->_shipping_address_1 = $order->get_shipping_address_1();
+        $order_data->_shipping_address_2 = $order->get_shipping_address_2();
+        $order_data->_shipping_city = $order->get_shipping_city();
+        $order_data->_shipping_state = $order->get_shipping_state();
+        $order_data->_shipping_postcode = $order->get_shipping_postcode();
+        $order_data->order_total = $order->get_total();
+        $order_data->order_tax = $order->get_total_tax();
+        $order_data->paid_date = $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d H:i:s') : '';
+
+        // Get product IDs
+        $product_ids = array();
+        foreach ($order->get_items() as $item) {
+            $product_ids[] = $item->get_product_id();
+        }
+        $order_data->items_id = implode('|', $product_ids);
+
+        $result[] = $order_data;
     }
-    return $orders;
+
+    return $result;
 }
 
 function wc_sendsms_get_all_orders()
 {
-    global $wpdb;
-    # get all orders
-    $query = "select
-        p.ID as order_id,
-        p.post_date,
-        max( CASE WHEN pm.meta_key = '_billing_email' and p.ID = pm.post_id THEN pm.meta_value END ) as billing_email,
-        max( CASE WHEN pm.meta_key = '_billing_first_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_first_name,
-        max( CASE WHEN pm.meta_key = '_billing_last_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_last_name,
-        max( CASE WHEN pm.meta_key = '_billing_address_1' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_address_1,
-        max( CASE WHEN pm.meta_key = '_billing_address_2' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_address_2,
-        max( CASE WHEN pm.meta_key = '_billing_city' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_city,
-        max( CASE WHEN pm.meta_key = '_billing_state' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_state,
-        max( CASE WHEN pm.meta_key = '_billing_phone' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_phone,
-        max( CASE WHEN pm.meta_key = '_billing_postcode' and p.ID = pm.post_id THEN pm.meta_value END ) as _billing_postcode,
-        max( CASE WHEN pm.meta_key = '_shipping_first_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_first_name,
-        max( CASE WHEN pm.meta_key = '_shipping_last_name' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_last_name,
-        max( CASE WHEN pm.meta_key = '_shipping_address_1' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_address_1,
-        max( CASE WHEN pm.meta_key = '_shipping_address_2' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_address_2,
-        max( CASE WHEN pm.meta_key = '_shipping_city' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_city,
-        max( CASE WHEN pm.meta_key = '_shipping_state' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_state,
-        max( CASE WHEN pm.meta_key = '_shipping_postcode' and p.ID = pm.post_id THEN pm.meta_value END ) as _shipping_postcode,
-        max( CASE WHEN pm.meta_key = '_order_total' and p.ID = pm.post_id THEN pm.meta_value END ) as order_total,
-        max( CASE WHEN pm.meta_key = '_order_tax' and p.ID = pm.post_id THEN pm.meta_value END ) as order_tax,
-        max( CASE WHEN pm.meta_key = '_paid_date' and p.ID = pm.post_id THEN pm.meta_value END ) as paid_date,
-        (
-            SELECT
-                GROUP_CONCAT(oim.meta_value SEPARATOR '|')
-            FROM
-                wp_woocommerce_order_itemmeta oim, wp_woocommerce_order_items oi
-            WHERE 
-                oi.order_item_id = oim.order_item_id AND oim.meta_key = '_product_id'  AND oi.order_id = p.ID
-        ) AS items_id,
-        ( select group_concat( order_item_id separator '|' ) from " . $wpdb->prefix . "woocommerce_order_items where order_id = p.ID ) as order_items
-    from
-        " . $wpdb->prefix . "posts p
-        join " . $wpdb->prefix . "postmeta pm on p.ID = pm.post_id
-        join " . $wpdb->prefix . "woocommerce_order_items oi on p.ID = oi.order_id
-        WHERE post_type = 'shop_order' AND post_status = 'wc-completed'";
-    $query .= ' group by p.ID';
-    return $orders = $wpdb->get_results($query);
+    // Use WooCommerce HPOS-compatible API
+    $orders = wc_get_orders(array(
+        'limit' => -1,
+        'status' => 'completed',
+        'type' => 'shop_order', // Exclude refunds
+        'return' => 'objects'
+    ));
+
+    // Convert WC_Order objects to stdClass objects matching the old format
+    $result = array();
+    foreach ($orders as $order) {
+        // Skip refunds (extra safety check)
+        if ($order->get_type() !== 'shop_order') {
+            continue;
+        }
+
+        $order_data = new stdClass();
+        $order_data->order_id = $order->get_id();
+        $order_data->post_date = $order->get_date_created()->date('Y-m-d H:i:s');
+        $order_data->billing_email = $order->get_billing_email();
+        $order_data->_billing_first_name = $order->get_billing_first_name();
+        $order_data->_billing_last_name = $order->get_billing_last_name();
+        $order_data->_billing_address_1 = $order->get_billing_address_1();
+        $order_data->_billing_address_2 = $order->get_billing_address_2();
+        $order_data->_billing_city = $order->get_billing_city();
+        $order_data->_billing_state = $order->get_billing_state();
+        $order_data->_billing_phone = $order->get_billing_phone();
+        $order_data->_billing_postcode = $order->get_billing_postcode();
+        $order_data->_shipping_first_name = $order->get_shipping_first_name();
+        $order_data->_shipping_last_name = $order->get_shipping_last_name();
+        $order_data->_shipping_address_1 = $order->get_shipping_address_1();
+        $order_data->_shipping_address_2 = $order->get_shipping_address_2();
+        $order_data->_shipping_city = $order->get_shipping_city();
+        $order_data->_shipping_state = $order->get_shipping_state();
+        $order_data->_shipping_postcode = $order->get_shipping_postcode();
+        $order_data->order_total = $order->get_total();
+        $order_data->order_tax = $order->get_total_tax();
+        $order_data->paid_date = $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d H:i:s') : '';
+
+        // Get product IDs from order items
+        $product_ids = array();
+        foreach ($order->get_items() as $item) {
+            $product_ids[] = $item->get_product_id();
+        }
+        $order_data->items_id = implode('|', $product_ids);
+
+        $result[] = $order_data;
+    }
+
+    return $result;
 }
 
 function wc_sendsms_sanitize_event_time($event_time)
 {
     // General sanitization, to get rid of malicious scripts or characters
     $event_time = sanitize_text_field($event_time);
-    $event_time = filter_var($event_time, FILTER_SANITIZE_STRING);
+    // Note: filter_var with FILTER_SANITIZE_STRING is deprecated in PHP 8.1+
+    // sanitize_text_field() already handles the sanitization we need
 
     // Validation to see if it is the right format
     if (wc_sendsms_my_validate_date($event_time)) {
