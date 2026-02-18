@@ -3,7 +3,7 @@
 Plugin Name: SendSMS
 Plugin URI: https://www.sendsms.ro/ro/ecommerce/plugin-woocommerce/
 Description: Use our SMS shipping solution to deliver the right information at the right time. Give your customers a superior experience!
-Version: 1.4.0
+Version: 1.4.1
 Author: sendSMS
 License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -801,10 +801,8 @@ function wc_sendsms_ajax_send()
     if (!empty($_POST['content'])) {
         if (isset($_POST['all']) && $_POST['all'] === "true") {
             $orders = array();
-            if (empty($_POST['filtering'])) {
-                $orders = wc_sendsms_get_all_orders();
-            }
-            if (isset($_POST['filtering']) && $_POST['filtering'] === "1") {
+            $is_filtered = isset($_POST['filtering']) && $_POST['filtering'] === "true";
+            if ($is_filtered) {
                 $orders = wc_sendsms_get_orders_filtered(
                     isset($_POST['perioada_start']) ? $_POST['perioada_start'] : "",
                     isset($_POST['perioada_final']) ? $_POST['perioada_final'] : "",
@@ -812,6 +810,8 @@ function wc_sendsms_ajax_send()
                     isset($_POST['judete']) ? $_POST['judete'] : "",
                     isset($_POST['produse']) ? $_POST['produse'] : ""
                 );
+            } else {
+                $orders = wc_sendsms_get_all_orders();
             }
             $phones = array();
             if (count($orders)) {
