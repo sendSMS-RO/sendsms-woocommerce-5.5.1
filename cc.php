@@ -1,5 +1,7 @@
 <?php
-$country_codes = array(
+defined( 'ABSPATH' ) || exit;
+
+$wc_sendsms_country_codes = array(
     'AC' => '247',
     'AD' => '376',
     'AE' => '971',

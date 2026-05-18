@@ -3,7 +3,7 @@ Contributors: neamtua, catalinsendsms
 Tags: sms, woocommerce, sendsms
 Requires at least: 4.0
 Tested up to: 7.0
-Stable tag: 1.4.2
+Stable tag: 1.4.3
 License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -45,6 +45,19 @@ This module requires you to have WooCommerce installed.
 6. Send SMS within an order
 
 == Changelog ==
+= 1.4.3 =
+Security hardening and WordPress.org plugin-check compliance pass.
+* Order metabox single-send AJAX endpoint now requires both a nonce and the manage_woocommerce capability; previously any logged-in user could trigger SMS sends and write order notes.
+* Test-send form now CSRF-protected with wp_nonce_field/check_admin_referer.
+* SendSMS account password is no longer rendered back into the settings form value; the stored value is preserved when the password field is submitted empty.
+* History page now escapes every column value (defense against stored XSS via SMS content).
+* Balance check now uses HTTPS.
+* Order metabox is now registered on both the legacy and HPOS Orders screens (and the callback works with either WP_Post or WC_Order).
+* Campaign sends now build the CSV body in memory instead of writing to plugin/batches/ — eliminates a concurrency race and a brief web-readable window.
+* Multisite db-version check uses the same option storage as install (prevents dbDelta from running on every request on multisite).
+* Plugin slug, text domain, and translation file names harmonised under sendsms-for-woocommerce in preparation for WordPress.org submission.
+* Replaced the jQuery UI datepicker (loaded over CDN) with the native HTML5 date input.
+* Many smaller fixes: proper esc_attr in attribute contexts, prepared SQL in History list, sanitize+wp_unslash on all $_GET/$_POST reads, current_time()/gmdate() instead of date(), HPOS compatibility declared, prefixed previously-non-prefixed globals.
 = 1.4.2 =
 Tested up to WordPress 7.0.
 HPOS-aware opt-out: opt-out checkbox at checkout is now stored and read via the WooCommerce order API, so it correctly blocks SMS on sites using High-Performance Order Storage.

@@ -1,4 +1,6 @@
 <?php
+defined( 'ABSPATH' ) || exit;
+
 class WC_SendSMS_History_List_Table extends WP_List_Table {
     /**
      * Get list columns.
@@ -7,14 +9,14 @@ class WC_SendSMS_History_List_Table extends WP_List_Table {
      */
     public function get_columns() {
         return array(
-            'id'            => __('ID', 'sendsms'),
-            'phone'         => __('Phone', 'sendsms'),
-            'status'         => __('Status', 'sendsms'),
-            'message'         => __('Answer', 'sendsms'),
-            'details'         => __('Details', 'sendsms'),
-            'content'         => __('Content', 'sendsms'),
-            'type'         => __('Type', 'sendsms'),
-            'sent_on'         => __('Date', 'sendsms'),
+            'id'            => __('ID', 'sendsms-for-woocommerce'),
+            'phone'         => __('Phone', 'sendsms-for-woocommerce'),
+            'status'         => __('Status', 'sendsms-for-woocommerce'),
+            'message'         => __('Answer', 'sendsms-for-woocommerce'),
+            'details'         => __('Details', 'sendsms-for-woocommerce'),
+            'content'         => __('Content', 'sendsms-for-woocommerce'),
+            'type'         => __('Type', 'sendsms-for-woocommerce'),
+            'sent_on'         => __('Date', 'sendsms-for-woocommerce'),
         );
     }
 
@@ -29,56 +31,56 @@ class WC_SendSMS_History_List_Table extends WP_List_Table {
      * Return ID column
      */
     public function column_id( $issue ) {
-        return $issue['id'];
+        return esc_html( $issue['id'] );
     }
 
     /**
      * Return phone column
      */
     public function column_phone( $issue ) {
-        return $issue['phone'];
+        return esc_html( $issue['phone'] );
     }
 
     /**
      * Return message column
      */
     public function column_message( $issue ) {
-        return $issue['message'];
+        return esc_html( $issue['message'] );
     }
 
     /**
      * Return status column
      */
     public function column_status( $issue ) {
-        return $issue['status'];
+        return esc_html( $issue['status'] );
     }
 
     /**
      * Return details column
      */
     public function column_details( $issue ) {
-        return $issue['details'];
+        return esc_html( $issue['details'] );
     }
 
     /**
      * Return content column
      */
     public function column_content( $issue ) {
-        return $issue['content'];
+        return esc_html( $issue['content'] );
     }
 
     /**
      * Return type column
      */
     public function column_type( $issue ) {
-        return $issue['type'];
+        return esc_html( $issue['type'] );
     }
 
     /**
      * Return sent_on column
      */
     public function column_sent_on( $issue ) {
-        return $issue['sent_on'];
+        return esc_html( $issue['sent_on'] );
     }
 
     /**
@@ -128,22 +130,24 @@ class WC_SendSMS_History_List_Table extends WP_List_Table {
             $offset = 0;
         }
 
-        $search = '';
-
+        $where = ' WHERE 1 = 1';
+        $where_args = array();
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table search
         if (!empty($_REQUEST['s'])) {
-            $search = "AND phone LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
-            $search .= "OR message LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
-            $search .= "OR content LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
-            $search .= "OR `type` LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
-            $search .= "OR details LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
-            $search .= "OR sent_on LIKE '%" . esc_sql($wpdb->esc_like($_REQUEST['s'])) . "%' ";
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table search
+            $like = '%' . $wpdb->esc_like(sanitize_text_field(wp_unslash($_REQUEST['s']))) . '%';
+            $where .= ' AND (phone LIKE %s OR message LIKE %s OR content LIKE %s OR `type` LIKE %s OR details LIKE %s OR sent_on LIKE %s)';
+            $where_args = array($like, $like, $like, $like, $like, $like);
         }
 
-
-        if (isset($_GET['orderby']) && isset($columns[$_GET['orderby']])) {
-            $orderBy = sanitize_text_field($_GET['orderby']);
-            if (isset($_GET['order']) && in_array(strtolower($_GET['order']), array('asc', 'desc'))) {
-                $order = sanitize_text_field($_GET['order']);
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table ordering
+        if (isset($_GET['orderby']) && isset($columns[sanitize_text_field(wp_unslash($_GET['orderby']))])) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table ordering
+            $orderBy = sanitize_text_field(wp_unslash($_GET['orderby']));
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table ordering
+            if (isset($_GET['order']) && in_array(strtolower(sanitize_text_field(wp_unslash($_GET['order']))), array('asc', 'desc'), true)) {
+                // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list table ordering
+                $order = sanitize_text_field(wp_unslash($_GET['order']));
             } else {
                 $order = 'ASC';
             }
@@ -152,12 +156,19 @@ class WC_SendSMS_History_List_Table extends WP_List_Table {
             $order = 'DESC';
         }
 
-        $items = $wpdb->get_results(
-            "SELECT id, phone, status, message, details, content, `type`, sent_on FROM $table_name WHERE 1 = 1 {$search}" .
-            $wpdb->prepare("ORDER BY `$orderBy` $order LIMIT %d OFFSET %d;", $per_page, $offset ), ARRAY_A
-        );
+        // $orderBy and $order are whitelisted above; $table_name uses $wpdb->prefix.
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- our plugin's own history table; reads are paginated and use prepared placeholders.
+        $select_sql = "SELECT id, phone, status, message, details, content, `type`, sent_on FROM {$wpdb->prefix}wcsendsms_history" . $where . " ORDER BY `$orderBy` $order LIMIT %d OFFSET %d";
+        $count_sql  = "SELECT COUNT(id) FROM {$wpdb->prefix}wcsendsms_history" . $where;
 
-        $count = $wpdb->get_var("SELECT COUNT(id) FROM $table_name WHERE 1 = 1 {$search};");
+        $items = $wpdb->get_results(
+            $wpdb->prepare($select_sql, array_merge($where_args, array($per_page, $offset))),
+            ARRAY_A
+        );
+        $count = $where_args
+            ? (int) $wpdb->get_var($wpdb->prepare($count_sql, $where_args))
+            : (int) $wpdb->get_var($count_sql);
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared,WordPress.DB.PreparedSQL.InterpolatedNotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter
 
         $this->items = $items;
 
