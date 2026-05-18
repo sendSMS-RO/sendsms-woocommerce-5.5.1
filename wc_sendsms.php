@@ -3,7 +3,7 @@
 Plugin Name: SendSMS
 Plugin URI: https://www.sendsms.ro/ro/ecommerce/plugin-woocommerce/
 Description: Use our SMS shipping solution to deliver the right information at the right time. Give your customers a superior experience!
-Version: 1.4.1
+Version: 1.4.2
 Author: sendSMS
 License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -143,7 +143,11 @@ add_action('woocommerce_after_order_notes', 'wc_sendsms_optout');
 function wc_sendsms_optout_update_order_meta($orderId)
 {
     if (isset($_POST['wc_sendsms_optout'])) {
-        update_post_meta($orderId, 'wc_sendsms_optout', wc_sendsms_sanitize_bool($_POST['wc_sendsms_optout']));
+        $order = wc_get_order($orderId);
+        if ($order) {
+            $order->update_meta_data('wc_sendsms_optout', wc_sendsms_sanitize_bool($_POST['wc_sendsms_optout']));
+            $order->save();
+        }
     }
 }
 add_action('woocommerce_checkout_update_order_meta', 'wc_sendsms_optout_update_order_meta');
@@ -1267,12 +1271,14 @@ add_action("woocommerce_order_status_changed", "wc_sendsms_order_status_changed"
 
 function wc_sendsms_order_status_changed($order_id, $checkout = null)
 {
-    $order = new WC_Order($order_id);
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return;
+    }
     $status = $order->get_status();
-    $order_meta = get_post_meta($order_id);
 
-    # check if user opted out for the order
-    if (isset($order_meta['wc_sendsms_optout'])) {
+    # check if user opted out for the order (HPOS-aware)
+    if ($order->get_meta('wc_sendsms_optout')) {
         return;
     }
 
@@ -1304,7 +1310,7 @@ function wc_sendsms_order_status_changed($order_id, $checkout = null)
                 $phone = wc_sendsms_validate_phone($options['simulation_number']);
             } else {
                 # generate valid phone number
-                $phone = wc_sendsms_validate_phone($order->billing_phone);
+                $phone = wc_sendsms_validate_phone($order->get_billing_phone());
             }
 
             if (!empty($phone)) {
@@ -1792,7 +1798,7 @@ function wc_sendsms_replace_characters(&$message, $order, $order_id)
         '{shipping_first_name}' => wc_sendsms_clean_diacritice($order->get_shipping_first_name()),
         '{shipping_last_name}' => wc_sendsms_clean_diacritice($order->get_shipping_last_name()),
         '{order_number}' => $order_id,
-        '{order_date}' => date('d-m-Y', strtotime($order->get_date_created())),
+        '{order_date}' => $order->get_date_created() ? $order->get_date_created()->date('d-m-Y') : '',
         '{order_total}' => number_format($order->get_total(), wc_get_price_decimals(), ',', '')
     );
     foreach ($replace as $key => $value) {

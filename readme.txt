@@ -2,8 +2,8 @@
 Contributors: neamtua, catalinsendsms
 Tags: sms, woocommerce, sendsms
 Requires at least: 4.0
-Tested up to: 6.9
-Stable tag: 1.4.0
+Tested up to: 7.0
+Stable tag: 1.4.2
 License: GPLv2
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -24,7 +24,7 @@ Characteristics:
 * Easy to personalize
 * Order details: order number, order status
 * Extended settings
-* Compatible with WooCommerce 2.0+
+* Compatible with WooCommerce 3.0+
 * All versions of WordPress 4.0+ are supported
 * Possibility to send a test SMS to any number (you have the possibility to preview the notification to be sent)
 * Ability to selectively send messages to any of the customers who have placed orders on your site.
@@ -45,6 +45,11 @@ This module requires you to have WooCommerce installed.
 6. Send SMS within an order
 
 == Changelog ==
+= 1.4.2 =
+Tested up to WordPress 7.0.
+HPOS-aware opt-out: opt-out checkbox at checkout is now stored and read via the WooCommerce order API, so it correctly blocks SMS on sites using High-Performance Order Storage.
+Removed a WooCommerce "doing it wrong" notice triggered on every order status change (direct $order->billing_phone access replaced with get_billing_phone()).
+Fixed a PHP 8 deprecation in the {order_date} template variable.
 = 1.3.0 =
 Fixed several XSS vulnerabilities
 = 1.2.8 = 
